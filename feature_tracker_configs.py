@@ -185,6 +185,14 @@ class FeatureTrackerConfigs(object):
                       descriptor_type = FeatureDescriptorTypes.SUPERPOINT, 
                       match_ratio_test = kRatioTest,                               
                       tracker_type = kTrackerType)
+    
+    KP2DTINY = dict(num_features=kNumFeatures,                            # N.B.: here, keypoints are not oriented! (i.e. keypoint.angle=0 always)
+                      num_levels = 1, 
+                      scale_factor = 1.2,
+                      detector_type = FeatureDetectorTypes.KP2DTINY,
+                      descriptor_type = FeatureDescriptorTypes.KP2DTINY, 
+                      match_ratio_test = kRatioTest,                               
+                      tracker_type = kTrackerType)
 
     CONTEXTDESC = dict(num_features=kNumFeatures,                   
                        num_levels = 1,                                  

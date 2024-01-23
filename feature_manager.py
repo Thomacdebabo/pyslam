@@ -57,6 +57,8 @@ R2d2Feature2D = import_from('feature_r2d2', 'R2d2Feature2D')
 KeyNetDescFeature2D = import_from('feature_keynet', 'KeyNetDescFeature2D')
 DiskFeature2D = import_from('feature_disk', 'DiskFeature2D')
 
+KP2DtinyFeature = import_from('feature_kp2dtiny', 'KP2DtinyFeature')
+
 kVerbose = True   
 
 kNumFeatureDefault = Parameters.kNumFeatures
@@ -320,7 +322,19 @@ class FeatureManager(object):
                 self.pyramid_do_parallel = False                 # N.B.: SUPERPOINT interface class is not thread-safe!
                 self.force_multiscale_detect_and_compute = True  # force it since SUPERPOINT cannot compute descriptors separately from keypoints 
             #  
-            #                                                                                     
+            #                    
+        elif self.detector_type == FeatureDetectorTypes.KP2DTINY:         
+            self.oriented_features = False                         
+            self._feature_detector = KP2DtinyFeature() 
+            self.need_color_image = True  
+            if self.descriptor_type != FeatureDescriptorTypes.NONE:              
+                self.use_pyramid_adaptor = self.num_levels > 1    
+                self.need_nms = self.num_levels > 1   
+                self.pyramid_type = PyramidType.GAUSS_PYRAMID    
+                self.pyramid_do_parallel = False                 # N.B.: SUPERPOINT interface class is not thread-safe!
+                self.force_multiscale_detect_and_compute = True  # force it since SUPERPOINT cannot compute descriptors separately from keypoints 
+            #  
+            #                                                                   
         elif self.detector_type == FeatureDetectorTypes.FAST:    
             self.oriented_features = False             
             self._feature_detector = self.FAST_create(threshold=20, nonmaxSuppression=True)   
