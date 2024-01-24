@@ -66,7 +66,7 @@ if __name__ == "__main__":
                         config.cam_settings['Camera.cx'], config.cam_settings['Camera.cy'],
                         config.DistCoef, config.cam_settings['Camera.fps'])
     
-    num_features=2000 
+    num_features=3000 
 
     tracker_type = FeatureTrackerTypes.DES_BF      # descriptor-based, brute force matching with knn 
     #tracker_type = FeatureTrackerTypes.DES_FLANN  # descriptor-based, FLANN-based matching 
@@ -147,9 +147,12 @@ if __name__ == "__main__":
                 duration = time.time()-time_start 
                 if(frame_duration > duration):
                     print('sleeping for frame')
-                    time.sleep(frame_duration-duration)        
-                    
+                    time.sleep(frame_duration-duration)  
+
             img_id += 1  
+            if img_id % 100 == 0: 
+                print("saving checkpoint...")
+                slam.save()
         else:
             time.sleep(1)                                 
         
@@ -160,6 +163,8 @@ if __name__ == "__main__":
         # manage interface infos  
         
         if slam.tracking.state==SlamState.LOST:
+            print("saving map")
+            slam.save()
             if display2d is not None:     
                 getchar()                              
             else: 
@@ -187,7 +192,7 @@ if __name__ == "__main__":
         
         if viewer3D is not None:
             is_paused = not viewer3D.is_paused()         
-                        
+    slam.save()       
     slam.quit()
     
     #cv2.waitKey(0)

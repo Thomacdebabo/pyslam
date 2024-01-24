@@ -131,6 +131,20 @@ class Slam(object):
     # @ main track method @
     def track(self, img, frame_id, timestamp=None):
         return self.tracking.track(img,frame_id,timestamp)
+    
+    def save(self):
+        
+        points = [p.pt for p in self.map.get_points()]
+        
+        num_map_keyframes = self.map.num_keyframes()
+        keyframes = self.map.get_keyframes()
+        poses = []
+        if num_map_keyframes>0:       
+            poses = [kf.Twc for kf in keyframes]
+        with open('points.npy', 'wb') as f:
+            np.save(f,np.array(points))
+        with open('poses.npy', 'wb') as f:
+            np.save(f,np.array(poses))
 
 
 class Tracking(object):

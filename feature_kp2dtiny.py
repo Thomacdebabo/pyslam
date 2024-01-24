@@ -39,7 +39,7 @@ class SuperPointOptions:
         self.weights_path=config.cfg.root_folder + '/thirdparty/kp2dtiny/kp2dtiny_28.ckpt'
         self.nms_dist=4
         self.conf_thresh=0.015
-        self.nn_thresh=0.7
+        self.nn_thresh=0.9
         
         use_cuda = torch.cuda.is_available() & do_cuda
         device = torch.device('cuda' if use_cuda else 'cpu')
