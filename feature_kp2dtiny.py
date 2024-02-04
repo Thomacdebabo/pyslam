@@ -34,7 +34,7 @@ kVerbose = True
 
 
 class SuperPointOptions:
-    def __init__(self, do_cuda=True): 
+    def __init__(self, do_cuda=True, debug=False): 
         # default options from demo_superpoints
         self.weights_path=config.cfg.root_folder + '/thirdparty/kp2dtiny/kp2dtiny_28.ckpt'
         self.nms_dist=4
@@ -45,6 +45,7 @@ class SuperPointOptions:
         device = torch.device('cuda' if use_cuda else 'cpu')
         print('SuperPoint using ', device)        
         self.cuda=use_cuda   
+        self.debug=debug
     
     
 # convert matrix of pts into list of keypoints
@@ -69,9 +70,9 @@ def transpose_des(des):
 
 # interface for pySLAM 
 class KP2DtinyFeature: 
-    def __init__(self, do_cuda=True): 
+    def __init__(self, do_cuda=True, debug=False): 
         self.lock = RLock()
-        self.opts = SuperPointOptions(do_cuda)
+        self.opts = SuperPointOptions(do_cuda, debug)
         print(self.opts)        
         
         print('KP2Dtiny')
@@ -81,7 +82,8 @@ class KP2DtinyFeature:
                                 nms_dist=self.opts.nms_dist,
                                 conf_thresh=self.opts.conf_thresh,
                                 nn_thresh=self.opts.nn_thresh,
-                                cuda=self.opts.cuda)
+                                cuda=self.opts.cuda,
+                                plot=self.opts.debug)
         print('==> Successfully loaded pre-trained network.')
                         
         self.pts = []
@@ -91,7 +93,7 @@ class KP2DtinyFeature:
         self.frame = None 
         self.frameFloat = None 
         self.keypoint_size = 20  # just a representative size for visualization and in order to convert extracted points to cv2.KeyPoint 
-        self.resize = [240,960]
+        self.resize = [128,512]
         self.original_size = [370,1226]
         self.scale = [self.original_size[0]/self.resize[0], self.original_size[1]/self.resize[1]]
     # compute both keypoints and descriptors       
@@ -99,7 +101,6 @@ class KP2DtinyFeature:
         print(frame.shape)
         with self.lock: 
             self.frame = frame
-            print("okey so we in that detectn compute",frame.shape)
             frame = cv2.resize(frame.transpose([1,0,2]), dsize=self.resize)
             frame = (frame.astype('float32').transpose([2,1,0]) / 127.5 - 1.0)
             #self.frameFloat = np.stack([frame,frame,frame], axis=0)            

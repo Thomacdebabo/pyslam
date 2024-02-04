@@ -38,23 +38,126 @@ from feature_types import FeatureDetectorTypes, FeatureDescriptorTypes, FeatureI
 from feature_matcher import feature_matcher_factory, FeatureMatcherTypes
 
 from feature_tracker_configs import FeatureTrackerConfigs
+import argparse
+def parse_args():
+    parser = argparse.ArgumentParser(description='Visual Odometry')
+    parser.add_argument('--config', type=str, default='config/default.yaml', help='config file')
+    parser.add_argument('--dataset', type=str, default='dataset/kitti', help='dataset folder')
+    parser.add_argument('--output', type=str, default='output', help='output folder')
+    parser.add_argument('--verbose', action='store_true', help='verbose')
+    parser.add_argument('--use_viewer', action='store_true', help='use pangolin viewer')
+    parser.add_argument('--plot', action='store_true', help='plot results')
+    parser.add_argument('--tracker', type=str, default='LK_SHI_TOMASI', help='feature tracker')
+    args = parser.parse_args()
+    return args
 
+def calculate_statistics(errors, inliers_report, matches_report, fname='stats.json'):
+        # Show error statistics
+    errors = np.array(errors)
+    inliers_report = np.array(inliers_report)
+    matches_report = np.array(matches_report)
+    ratio = inliers_report/matches_report
+    
+    print("------------------")
+    print('Error statistics:')
+    print("------------------")
+    print('mean error: ', np.mean(errors))
+    print('median error: ', np.median(errors))
+    print('max error: ', np.max(errors))
+    print('min error: ', np.min(errors))
+    print('std error: ', np.std(errors))
+    print('RMSE: ', math.sqrt(np.mean(errors**2)))
+    print("------------------")
+    
+    print("------------------")
+    print('Matches statistics:')
+    print("------------------")
+    print('mean matches: ', np.mean(matches_report))
+    print('median matches: ', np.median(matches_report))
+    print('max matches: ', np.max(matches_report))
+    print('min matches: ', np.min(matches_report))
+    print('std matches: ', np.std(matches_report))
+    print("------------------")
+    
+    print("------------------")
+    print('Inliers statistics:')
+    print("------------------")
+    print('mean inliers: ', np.mean(inliers_report))
+    print('median inliers: ', np.median(inliers_report))
+    print('max inliers: ', np.max(inliers_report))
+    print('min inliers: ', np.min(inliers_report))
+    print('std inliers: ', np.std(inliers_report))
+    print("------------------")
+    
+    print("------------------")
+    print('Inliers/matches statistics:')
+    print("------------------")
+    print('mean ratio: ', np.mean(ratio))
+    print('median ratio: ', np.median(ratio))
+    print('max ratio: ', np.max(ratio))
+    print('min ratio: ', np.min(ratio))
+    print('std ratio: ', np.std(ratio))
+    print("------------------")
+    
+    # store statistics as a json file
+    import json
+    stats = {}
+    stats['mean_error'] = np.mean(errors)
+    stats['median_error'] = np.median(errors)
+    stats['max_error'] = np.max(errors)
+    stats['min_error'] = np.min(errors)
+    stats['std_error'] = np.std(errors)
+    stats['RMSE'] = math.sqrt(np.mean(errors**2))
+    stats['mean_matches'] = np.mean(matches_report)
+    stats['median_matches'] = np.median(matches_report)
+    stats['max_matches'] = np.max(matches_report)
+    stats['min_matches'] = np.min(matches_report)
+    stats['std_matches'] = np.std(matches_report)
+    stats['mean_inliers'] = np.mean(inliers_report)
+    stats['median_inliers'] = np.median(inliers_report)
+    stats['max_inliers'] = np.max(inliers_report)
+    stats['min_inliers'] = np.min(inliers_report)
+    stats['std_inliers'] = np.std(inliers_report)
+    stats['mean_ratio'] = np.mean(ratio)
+    stats['median_ratio'] = np.median(ratio)
+    stats['max_ratio'] = np.max(ratio)
+    stats['min_ratio'] = np.min(ratio)
+    stats['std_ratio'] = np.std(ratio)
+    
+    # convert all values in stats to python int from numpy
+    
+    for key in stats.keys():
+        stats[key] = int(stats[key])
+    with open(fname, 'w') as outfile:
+        json.dump(stats, outfile)
 
 
 """
 use or not pangolin (if you want to use it then you need to install it by using the script install_thirdparty.sh)
 """
-kUsePangolin = False  
 
-if kUsePangolin:
-    from viewer3D import Viewer3D
+kUsePangolin = False
 
 
 
 
 if __name__ == "__main__":
 
+    args = parse_args()
+    kUsePangolin = args.use_viewer
+    
+    
+    is_draw_3d = args.plot
+    is_draw_traj_img = args.plot
+    is_draw_err = args.plot 
+    is_draw_matched_points = args.plot 
+    is_draw_cam = args.plot
+    
+    if kUsePangolin:
+        from viewer3D import Viewer3D
     config = Config()
+    
+    config.dataset_settings['is_color'] = "True"
 
     dataset = dataset_factory(config.dataset_settings)
 
@@ -71,7 +174,7 @@ if __name__ == "__main__":
     # select your tracker configuration (see the file feature_tracker_configs.py) 
     # LK_SHI_TOMASI, LK_FAST
     # SHI_TOMASI_ORB, FAST_ORB, ORB, BRISK, AKAZE, FAST_FREAK, SIFT, ROOT_SIFT, SURF, SUPERPOINT, FAST_TFEAT
-    tracker_config = FeatureTrackerConfigs.LK_SHI_TOMASI
+    tracker_config = tracker_config = getattr(FeatureTrackerConfigs, args.tracker)
     tracker_config['num_features'] = num_features
     
     feature_tracker = feature_tracker_factory(**tracker_config)
@@ -79,25 +182,29 @@ if __name__ == "__main__":
     # create visual odometry object 
     vo = VisualOdometry(cam, groundtruth, feature_tracker)
 
-    is_draw_traj_img = True
+    
     traj_img_size = 800
     traj_img = np.zeros((traj_img_size, traj_img_size, 3), dtype=np.uint8)
     half_traj_img_size = int(0.5*traj_img_size)
     draw_scale = 1
 
-    is_draw_3d = True
-    if kUsePangolin:
-        viewer3D = Viewer3D()
-    else:
-        plt3d = Mplot3d(title='3D trajectory')
+    
+    if args.plot:
+        if kUsePangolin:
+            viewer3D = Viewer3D()
+        else:
+            plt3d = Mplot3d(title='3D trajectory')
 
-    is_draw_err = True 
-    err_plt = Mplot2d(xlabel='img id', ylabel='m',title='error')
+    
+        err_plt = Mplot2d(xlabel='img id', ylabel='m',title='error')
 
-    is_draw_matched_points = True 
-    matched_points_plt = Mplot2d(xlabel='img id', ylabel='# matches',title='# matches')
+        
+        matched_points_plt = Mplot2d(xlabel='img id', ylabel='# matches',title='# matches')
 
     img_id = 0
+    errors = []
+    matches_report = []
+    inliers_report = []
     while dataset.isOk():
 
         img = dataset.getImage(img_id)
@@ -130,35 +237,48 @@ if __name__ == "__main__":
                         plt3d.drawTraj(vo.traj3d_gt,'ground truth',color='r',marker='.')
                         plt3d.drawTraj(vo.traj3d_est,'estimated',color='g',marker='.')
                         plt3d.refresh()
-
+                err = math.sqrt((x_true-x)**2 + (y_true-y)**2 + (z_true-z)**2)
+                errors.append(err)
                 if is_draw_err:         # draw error signals 
                     errx = [img_id, math.fabs(x_true-x)]
                     erry = [img_id, math.fabs(y_true-y)]
                     errz = [img_id, math.fabs(z_true-z)] 
+                    
+                    
+                    sqr_err  = [img_id, err]
                     err_plt.draw(errx,'err_x',color='g')
                     err_plt.draw(erry,'err_y',color='b')
                     err_plt.draw(errz,'err_z',color='r')
+                    err_plt.draw(sqr_err,'sqr_err',color='k')
                     err_plt.refresh()    
+                    
 
                 if is_draw_matched_points:
                     matched_kps_signal = [img_id, vo.num_matched_kps]
                     inliers_signal = [img_id, vo.num_inliers]                    
                     matched_points_plt.draw(matched_kps_signal,'# matches',color='b')
                     matched_points_plt.draw(inliers_signal,'# inliers',color='g')                    
-                    matched_points_plt.refresh()                    
+                    matched_points_plt.refresh()
+                matches_report.append(vo.num_matched_kps)
+                inliers_report.append(vo.num_inliers)                    
 
 
             # draw camera image 
-            cv2.imshow('Camera', vo.draw_img)				
+            if is_draw_cam:
+                cv2.imshow('Camera', vo.draw_img)				
 
         # press 'q' to exit!
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        if is_draw_cam:
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
         img_id += 1
 
     #print('press a key in order to exit...')
     #cv2.waitKey(0)
-
+    
+    calculate_statistics(errors, inliers_report, matches_report, fname='stats.json')
+        
+    
     if is_draw_traj_img:
         print('saving map.png')
         cv2.imwrite('map.png', traj_img)

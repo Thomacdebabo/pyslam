@@ -153,6 +153,7 @@ class VideoDataset(Dataset):
         self._next_timestamp = self._timestamp + self.Ts 
         if ret is False:
             print('ERROR while reading from file: ', self.filename)
+            self.is_ok = False
         return image       
 
 

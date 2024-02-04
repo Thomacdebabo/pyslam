@@ -61,7 +61,7 @@ if int(cv2.__version__[0]) < 3: # pragma: no cover
 class KP2DtinyFrontend(object):
   """ Wrapper around pytorch net to help with pre and post image processing. """
   def __init__(self, weights_path, nms_dist, conf_thresh, nn_thresh,
-               cuda=False):
+               cuda=False, apply_semantic_filer=False, classes_to_filter=[21], plot=True):
     self.name = 'KP2Dtiny'
     self.cuda = cuda
     self.nms_dist = nms_dist
@@ -70,6 +70,9 @@ class KP2DtinyFrontend(object):
     self.cell = 8 # Size of each output cell. Keep this fixed.
     self.border_remove = 4 # Remove points this close to the border.
     self.v2_seg = True
+    self.classes_to_filter = classes_to_filter
+    self.apply_semantic_filer = apply_semantic_filer
+    self.plot = plot
     # Load the network in inference mode.
     self.net = KeypointNetRaw(**KP2D_TINY, v2_seg=self.v2_seg, nClasses=28)
     if cuda:
@@ -103,20 +106,23 @@ class KP2DtinyFrontend(object):
     with torch.no_grad():
       score, coord, feat, _, seg = self.net.forward(inp)
     score = torch.cat([coord, score], dim=1).view(3, -1).t().cpu().numpy()
-    print(seg.shape)
     
-    numbers_to_check = [0,21]  # Add the numbers you want to check here
-    debug = cv2.resize(seg[0,0].cpu().numpy()/28, (W, H))
-    debug_s =  np.isin(seg[0,0].cpu().numpy(), numbers_to_check).astype("float32")
-    debug_s = cv2.resize(debug_s, (W, H)) 
-    cv2.imshow('seg', debug)
-    cv2.imshow('seg_s', debug_s)
-    cv2.waitKey(1)
+    if self.plot:
+     # Add the numbers you want to check here
+      debug = cv2.resize(seg[0,0].cpu().numpy()/28, (W, H))
+      debug_s = np.isin(seg[0,0].cpu().numpy(), self.classes_to_filter).astype("float32")
+      debug_s = cv2.resize(debug_s, (W, H)) 
+      cv2.imshow('seg', debug)
+      cv2.imshow('seg_s', debug_s)
+      cv2.waitKey(1)
     feat = feat.view(32, -1).t().cpu().numpy()
     
-    seg_mask = ~np.isin(seg.view(-1).cpu().numpy(), numbers_to_check)
     
-    mask = (score[:, 2] > self.nn_thresh) #& seg_mask
+    
+    mask = (score[:, 2] > self.nn_thresh)
+    if self.apply_semantic_filer:
+      seg_mask = ~np.isin(seg.view(-1).cpu().numpy(), self.classes_to_filter)
+      mask = mask & seg_mask
  
     # Filter based on confidence threshold
     feat = feat[mask, :]
