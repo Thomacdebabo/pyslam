@@ -50,9 +50,12 @@ def groundtruth_factory(settings):
         if 'associations' in settings:
             associations = settings['associations']        
         return TumGroundTruth(path, name, associations, GroundTruthType.TUM)
+    if type == 'kittivideo':   
+        name = settings['groundtruth_file']
+        return KittiVideoGroundTruth(path, name, associations, GroundTruthType.KITTI)     
     if type == 'video' or type == 'folder':   
         name = settings['groundtruth_file']
-        return SimpleGroundTruth(path, name, associations, GroundTruthType.SIMPLE)     
+        return SimpleGroundTruth(path, name, associations, GroundTruthType.SIMPLE)    
     else:
         print('not using groundtruth')
         print('if you are using main_vo.py, your estimated trajectory will not make sense!')          
@@ -114,6 +117,49 @@ class SimpleGroundTruth(GroundTruth):
         abs_scale = np.sqrt((x - x_prev)*(x - x_prev) + (y - y_prev)*(y - y_prev) + (z - z_prev)*(z - z_prev))
         return x,y,z,abs_scale 
 
+class KittiVideoGroundTruth(GroundTruth):
+    def __init__(self, path, name, associations=None, type = GroundTruthType.KITTI): 
+        super().__init__(path, name, associations, type)
+        self.scale = kScaleSimple
+        self.filename=path + '/'  +"06.txt"
+        with open(self.filename) as f:
+            self.data = f.readlines()
+            self.found = True 
+        if self.data is None:
+            sys.exit('ERROR while reading groundtruth file: please, check how you deployed the files and if the code is consistent with this!') 
+
+    def getPoseAndAbsoluteScale(self, frame_id):
+        ss = self.getDataLine(frame_id-1)
+        x_prev = self.scale*float(ss[3])
+        y_prev = self.scale*float(ss[7])
+        z_prev = self.scale*float(ss[11])     
+        ss = self.getDataLine(frame_id) 
+        x = self.scale*float(ss[3])
+        y = self.scale*float(ss[7])
+        z = self.scale*float(ss[11])
+        abs_scale = np.sqrt((x - x_prev)*(x - x_prev) + (y - y_prev)*(y - y_prev) + (z - z_prev)*(z - z_prev))
+        return x,y,z,abs_scale 
+    
+    def extract_pose_values(self, frame_id):
+        pose_values = self.getDataLine(frame_id)
+        # convert all values to floats
+        pose_values = [float(value) for value in pose_values]
+        # Reshape the pose values into a 3x4 matrix
+        pose_matrix = np.reshape(pose_values, (3, 4))
+
+        # Ensure self.scale is a float
+        scale = float(self.scale)
+        # Ensure pose_matrix[:, 3] is a numpy array of floats
+        pose_matrix[:, 3] = pose_matrix[:, 3]
+
+        # Now you can perform the multiplication
+        translation = pose_matrix[:, 3]
+        translation =  translation * scale
+        
+        # Extract rotation matrix
+        rotation_matrix = pose_matrix[:, :3]
+        return translation, rotation_matrix
+
 
 class KittiGroundTruth(GroundTruth):
     def __init__(self, path, name, associations=None, type = GroundTruthType.KITTI): 
@@ -137,6 +183,18 @@ class KittiGroundTruth(GroundTruth):
         z = self.scale*float(ss[11])
         abs_scale = np.sqrt((x - x_prev)*(x - x_prev) + (y - y_prev)*(y - y_prev) + (z - z_prev)*(z - z_prev))
         return x,y,z,abs_scale 
+    
+    def extract_pose_values(self, frame_id):
+        pose_values = self.getDataLine(frame_id)
+        # Reshape the pose values into a 3x4 matrix
+        pose_matrix = np.reshape(pose_values, (3, 4))
+
+        # Extract translation vector (x, y, z) and apply scaling
+        translation = self.scale * pose_matrix[:, 3]
+
+        # Extract rotation matrix
+        rotation_matrix = pose_matrix[:, :3]
+        return translation, rotation_matrix
 
 
 class TumGroundTruth(GroundTruth):

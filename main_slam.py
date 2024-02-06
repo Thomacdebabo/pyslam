@@ -68,12 +68,12 @@ if __name__ == "__main__":
     
     num_features=3000 
 
-    tracker_type = FeatureTrackerTypes.DES_BF      # descriptor-based, brute force matching with knn 
+    tracker_type = FeatureTrackerTypes.DES_FLANN      # descriptor-based, brute force matching with knn 
     #tracker_type = FeatureTrackerTypes.DES_FLANN  # descriptor-based, FLANN-based matching 
 
     # select your tracker configuration (see the file feature_tracker_configs.py) 
     # FeatureTrackerConfigs: SHI_TOMASI_ORB, FAST_ORB, ORB, ORB2, ORB2_FREAK, ORB2_BEBLID, BRISK, AKAZE, FAST_FREAK, SIFT, ROOT_SIFT, SURF, SUPERPOINT, FAST_TFEAT, CONTEXTDESC
-    tracker_config = FeatureTrackerConfigs.KP2DTINY
+    tracker_config = FeatureTrackerConfigs.SIFT
     tracker_config['num_features'] = num_features
     tracker_config['tracker_type'] = tracker_type
     
@@ -109,8 +109,10 @@ if __name__ == "__main__":
             timestamp = dataset.getTimestamp()          # get current timestamp 
             next_timestamp = dataset.getNextTimestamp() # get next timestamp 
             frame_duration = next_timestamp-timestamp 
-
+            
             if img is not None:
+                # half the resolution of img
+                #img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
                 time_start = time.time()                  
                 slam.track(img, img_id, timestamp)  # main SLAM function 
                                 

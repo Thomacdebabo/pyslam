@@ -5,6 +5,7 @@ import thirdparty.kp2dtiny.utils.netvlad as netvlad
 import torch.nn.functional as F
 import inspect
 from thirdparty.kp2dtiny.utils.image import image_grid
+from thirdparty.kp2dtiny.utils.segformer_pytorch import EfficientSelfAttention, PreNorm, MixFeedForward
 
 KP2D_TINY = {
     "use_color":True,
@@ -163,7 +164,7 @@ class KeypointNetRaw(torch.nn.Module):
 
     def __init__(self, use_color=True, do_upsample=True, with_drop=True, do_cross=True,
                  nfeatures=256,device = 'cpu', channel_dims=[32, 64, 128, 256, 256, 512],
-                 bn_momentum=0.1, nClasses=8, num_clusters=64, downsample = 3, large_netvlad=False, v2_seg=False, **kwargs):
+                 bn_momentum=0.1, nClasses=8, num_clusters=64, downsample = 3, large_netvlad=False, v2_seg=False, use_attention=False, **kwargs):
         super().__init__()
         print("Dropout:",with_drop)
         self.device = device
@@ -176,6 +177,7 @@ class KeypointNetRaw(torch.nn.Module):
         self.nClasses = nClasses
         self.large_netvlad = large_netvlad
         self.v2_seg = v2_seg
+        self.use_attention = use_attention
 
         if self.use_color:
             c0 = 3
@@ -197,9 +199,14 @@ class KeypointNetRaw(torch.nn.Module):
         self.conv2b = torch.nn.Sequential(torch.nn.Conv2d(c2, c3, kernel_size=3, stride=1, padding=1, bias=False), torch.nn.BatchNorm2d(c3,momentum=self.bn_momentum))
         self.conv3a = torch.nn.Sequential(torch.nn.Conv2d(c3, c3, kernel_size=3, stride=1, padding=1, bias=False), torch.nn.BatchNorm2d(c3,momentum=self.bn_momentum))
         self.conv3b = torch.nn.Sequential(torch.nn.Conv2d(c3, c4, kernel_size=3, stride=1, padding=1, bias=False), torch.nn.BatchNorm2d(c4,momentum=self.bn_momentum))
+        # if self.use_attention:
+        #     self.att_enc = torch.nn.ModuleList([
+        #             PreNorm(c4, EfficientSelfAttention(dim = c4, heads = 4, reduction_ratio = 2)),
+        #             PreNorm(c4, MixFeedForward(dim = c4, expansion_factor = 2, activation='gelu')),
+        #         ])
+
         self.conv4a = torch.nn.Sequential(torch.nn.Conv2d(c4, c4, kernel_size=3, stride=1, padding=1, bias=False), torch.nn.BatchNorm2d(c4,momentum=self.bn_momentum))
         self.conv4b = torch.nn.Sequential(torch.nn.Conv2d(c4, c4, kernel_size=3, stride=1, padding=1, bias=False), torch.nn.BatchNorm2d(c4,momentum=self.bn_momentum))
-
         # Score Head.
         self.convDa = torch.nn.Sequential(torch.nn.Conv2d(c4, c4, kernel_size=3, stride=1, padding=1, bias=False), torch.nn.BatchNorm2d(c4,momentum=self.bn_momentum))
         self.convDb = torch.nn.Conv2d(c4, 1, kernel_size=3, stride=1, padding=1)
@@ -225,12 +232,31 @@ class KeypointNetRaw(torch.nn.Module):
         self.convSbb = torch.nn.Conv2d(c5, nClasses, kernel_size=3, stride=1, padding=1)
         self.softmax = torch.nn.Softmax2d()
         if self.v2_seg:
-            self.convSv2a = torch.nn.Sequential(torch.nn.Conv2d(c5, c5, kernel_size=3, stride=1, padding=1, bias=False),
-                                                torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum))
-            self.convSv2b = torch.nn.Sequential(torch.nn.Conv2d(c5, c4*4, kernel_size=3, stride=1, padding=1, bias=False),
-                                                torch.nn.BatchNorm2d(c4*4, momentum=self.bn_momentum))
-            self.convSv2c = torch.nn.Sequential(torch.nn.Conv2d(c4*2, c5, kernel_size=3, stride=1, padding=1, bias=False),
-                                                torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum))
+            if self.use_attention:
+                self.attention = torch.nn.ModuleList([
+                    PreNorm(c5, EfficientSelfAttention(dim = c5, heads = 4, reduction_ratio = 2)),
+                    PreNorm(c5, MixFeedForward(dim = c5, expansion_factor = 2, activation='gelu')),
+                    PreNorm(c5, EfficientSelfAttention(dim = c5, heads = 4, reduction_ratio = 2)),
+                    PreNorm(c5, MixFeedForward(dim = c5, expansion_factor = 2, activation='gelu')),
+                ])
+                self.convSv2b = torch.nn.Sequential(torch.nn.Conv2d(c5, c4*4, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c4*4, momentum=self.bn_momentum))
+                self.convSv2c = torch.nn.Sequential(torch.nn.Conv2d(c4*2, c5, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum))
+            else:
+                self.convs = torch.nn.ModuleList([
+                    torch.nn.Sequential(torch.nn.Conv2d(c5, c5, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum)),
+                    torch.nn.Sequential(torch.nn.Conv2d(c5, c5, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum))
+                ])
+                    
+                self.convSv2a = torch.nn.Sequential(torch.nn.Conv2d(c5, c5, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum))
+                self.convSv2b = torch.nn.Sequential(torch.nn.Conv2d(c5, c4*4, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c4*4, momentum=self.bn_momentum))
+                self.convSv2c = torch.nn.Sequential(torch.nn.Conv2d(c4*2, c5, kernel_size=3, stride=1, padding=1, bias=False),
+                                                    torch.nn.BatchNorm2d(c5, momentum=self.bn_momentum))
             
 
         # Netvlad
@@ -313,6 +339,7 @@ class KeypointNetRaw(torch.nn.Module):
             skip = self.dropout(skip)
         if self.downsample >= 1:
             x = self.pool(skip)
+
         x = self.relu(self.conv4a(x))
         x = self.relu(self.conv4b(x))
         if self.with_drop:
@@ -366,6 +393,7 @@ class KeypointNetRaw(torch.nn.Module):
             skip = self.dropout(skip)
         if self.downsample >= 1:
             x = self.pool(skip)
+
         x = self.relu(self.conv4a(x))
         x = self.relu(self.conv4b(x))
         if self.with_drop:
@@ -425,12 +453,25 @@ class KeypointNetRaw(torch.nn.Module):
         # Segmentation
         seg = self.relu(self.convSa(x))
         if self.v2_seg:
-            seg = self.pool(seg)
-            seg = self.relu(self.convSv2a(seg))
-            seg = self.relu(self.convSv2b(seg))
-            seg = self.upsample_seg(seg)
-            seg = torch.cat([seg, x], dim=1)
-            seg = self.relu(self.convSv2c(seg))
+            if self.use_attention:
+                seg = self.attention[0](seg)
+                seg = self.attention[1](seg)
+                seg = self.pool(seg)
+                seg = self.attention[2](seg)
+                seg = self.attention[3](seg)
+                seg = self.relu(self.convSv2b(seg))
+                seg = self.upsample_seg(seg)
+                seg = torch.cat([seg, x], dim=1)
+                seg = self.relu(self.convSv2c(seg))
+            else:
+                seg = self.relu(self.convs[0](seg))
+                seg = self.pool(seg)
+                seg = self.relu(self.convs[1](seg))
+                seg = self.relu(self.convSv2a(seg))
+                seg = self.relu(self.convSv2b(seg))
+                seg = self.upsample_seg(seg)
+                seg = torch.cat([seg, x], dim=1)
+                seg = self.relu(self.convSv2c(seg))
         if self.dropout:
             seg = self.dropout(seg)
         if self.do_upsample:
@@ -452,8 +493,7 @@ class KeypointNetRaw(torch.nn.Module):
             dn = torch.norm(feat, p=2, dim=1)  # Compute the norm.
             feat = feat.div(torch.unsqueeze(dn, 1))  # Divide by norm to normalize.
             seg = self.softmax(seg)
-            seg = torch.nn.functional.grid_sample(seg, coord_norm, align_corners=True)
+            seg = torch.nn.functional.grid_sample(seg, coord_norm, align_corners=True, mode='nearest')
+            
             seg = seg.argmax(1).unsqueeze(1)
-            
-            
         return score, coord, feat, vlad, seg

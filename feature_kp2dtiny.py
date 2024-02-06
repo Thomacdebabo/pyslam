@@ -34,12 +34,12 @@ kVerbose = True
 
 
 class SuperPointOptions:
-    def __init__(self, do_cuda=True, debug=False): 
+    def __init__(self, do_cuda=True, debug=True): 
         # default options from demo_superpoints
-        self.weights_path=config.cfg.root_folder + '/thirdparty/kp2dtiny/kp2dtiny_28.ckpt'
+        self.weights_path=config.cfg.root_folder + '/thirdparty/kp2dtiny/kp2dtiny_attention_28.ckpt'
         self.nms_dist=4
         self.conf_thresh=0.015
-        self.nn_thresh=0.9
+        self.nn_thresh=0.1
         
         use_cuda = torch.cuda.is_available() & do_cuda
         device = torch.device('cuda' if use_cuda else 'cpu')
@@ -70,7 +70,7 @@ def transpose_des(des):
 
 # interface for pySLAM 
 class KP2DtinyFeature: 
-    def __init__(self, do_cuda=True, debug=False): 
+    def __init__(self, do_cuda=True, debug=True, ): 
         self.lock = RLock()
         self.opts = SuperPointOptions(do_cuda, debug)
         print(self.opts)        
@@ -93,22 +93,23 @@ class KP2DtinyFeature:
         self.frame = None 
         self.frameFloat = None 
         self.keypoint_size = 20  # just a representative size for visualization and in order to convert extracted points to cv2.KeyPoint 
-        self.resize = [128,512]
-        self.original_size = [370,1226]
-        self.scale = [self.original_size[0]/self.resize[0], self.original_size[1]/self.resize[1]]
+        self.scale_f = 2
     # compute both keypoints and descriptors       
     def detectAndCompute(self, frame, mask=None):  # mask is a fake input 
-        print(frame.shape)
+        original_size = frame.shape
+        h = int((original_size[0]//self.scale_f // 8) * 8)
+        w = int((original_size[1]//self.scale_f // 8) * 8)
+        scale = [original_size[0]/h, original_size[1]/w]
         with self.lock: 
             self.frame = frame
-            frame = cv2.resize(frame.transpose([1,0,2]), dsize=self.resize)
+            frame = cv2.resize(frame.transpose([1,0,2]), dsize=[h,w])
             frame = (frame.astype('float32').transpose([2,1,0]) / 127.5 - 1.0)
             #self.frameFloat = np.stack([frame,frame,frame], axis=0)            
             self.frameFloat = frame
             self.pts, self.des = self.fe.run(self.frameFloat)
 
-            self.pts[:,0] = self.pts[:,0]*self.scale[1]
-            self.pts[:,1] = self.pts[:,1]*self.scale[0]
+            self.pts[:,0] = self.pts[:,0]*scale[1]
+            self.pts[:,1] = self.pts[:,1]*scale[0]
             # N.B.: pts are - 3xN numpy array with corners [x_i, y_i, confidence_i]^T.
             #print('pts: ', self.pts.T)
             self.kps = convert_superpts_to_keypoints(self.pts, size=self.keypoint_size)
@@ -127,7 +128,7 @@ class KP2DtinyFeature:
     def compute(self, frame, kps=None, mask=None): # kps is a fake input, mask is a fake input
         with self.lock: 
             if self.frame is not frame:
-                Printer.orange('WARNING: SUPERPOINT is recomputing both kps and des on last input frame', frame.shape)
+                Printer.orange('WARNING: KP2DTiny is recomputing both kps and des on last input frame', frame.shape)
                 self.detectAndCompute(frame)
             return self.kps, transpose_des(self.des)
            

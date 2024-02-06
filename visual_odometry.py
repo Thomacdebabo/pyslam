@@ -75,6 +75,9 @@ class VisualOdometry(object):
         self.t0_gt = None            # history of ground truth translations (if available)
         self.traj3d_est = []         # history of estimated translations centered w.r.t. first one
         self.traj3d_gt = []          # history of estimated ground truth translations centered w.r.t. first one     
+        
+        self.R_est = []
+        self.t_est = []
 
         self.num_matched_kps = None    # current number of matched keypoints  
         self.num_inliers = None        # current number of inliers 
@@ -161,7 +164,11 @@ class VisualOdometry(object):
         self.timer_feat.refresh()
         # estimate pose 
         self.timer_pose_est.start()
-        R, t = self.estimatePose(self.track_result.kps_ref_matched, self.track_result.kps_cur_matched)     
+        R, t = self.estimatePose(self.track_result.kps_ref_matched, self.track_result.kps_cur_matched)  
+        
+        self.R_est.append(R)
+        self.t_est.append(t)
+           
         self.timer_pose_est.refresh()
         # update keypoints history  
         self.kps_ref = self.track_result.kps_ref

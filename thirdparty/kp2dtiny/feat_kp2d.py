@@ -61,7 +61,7 @@ if int(cv2.__version__[0]) < 3: # pragma: no cover
 class KP2DtinyFrontend(object):
   """ Wrapper around pytorch net to help with pre and post image processing. """
   def __init__(self, weights_path, nms_dist, conf_thresh, nn_thresh,
-               cuda=False, apply_semantic_filer=False, classes_to_filter=[21], plot=True):
+               cuda=False, apply_semantic_filer=True, classes_to_filter=[21], plot=True):
     self.name = 'KP2Dtiny'
     self.cuda = cuda
     self.nms_dist = nms_dist
@@ -74,15 +74,15 @@ class KP2DtinyFrontend(object):
     self.apply_semantic_filer = apply_semantic_filer
     self.plot = plot
     # Load the network in inference mode.
-    self.net = KeypointNetRaw(**KP2D_TINY, v2_seg=self.v2_seg, nClasses=28)
+    self.net = KeypointNetRaw(**KP2D_TINY, v2_seg=self.v2_seg, nClasses=28, use_attention=True)
     if cuda:
       # Train on GPU, deploy on GPU.
-      self.net.load_state_dict(torch.load(weights_path))
+      self.net.load_state_dict(torch.load(weights_path), strict=False)
       self.net = self.net.cuda()
     else:
       # Train on GPU, deploy on CPU.
       self.net.load_state_dict(torch.load(weights_path,
-                               map_location=lambda storage, loc: storage)['state_dict'])
+                               map_location=lambda storage, loc: storage)['state_dict'], strict=False)
     self.net.eval()
     self.net.training = False
 
@@ -121,12 +121,12 @@ class KP2DtinyFrontend(object):
     
     mask = (score[:, 2] > self.nn_thresh)
     if self.apply_semantic_filer:
-      seg_mask = ~np.isin(seg.view(-1).cpu().numpy(), self.classes_to_filter)
+      seg_mask = ~np.isin(seg[0,0].view(-1).cpu().numpy(), self.classes_to_filter)
       mask = mask & seg_mask
  
     # Filter based on confidence threshold
     feat = feat[mask, :]
     pts = score[mask, :]
     
+    
     return pts.copy(), feat.copy()
-

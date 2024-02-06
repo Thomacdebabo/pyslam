@@ -48,6 +48,8 @@ def parse_args():
     parser.add_argument('--use_viewer', action='store_true', help='use pangolin viewer')
     parser.add_argument('--plot', action='store_true', help='plot results')
     parser.add_argument('--tracker', type=str, default='LK_SHI_TOMASI', help='feature tracker')
+    parser.add_argument('--groundtruth', action='store_true', help='use groundtruth')
+    parser.add_argument('--img_resize', action='store_true', help='resize images')
     args = parser.parse_args()
     return args
 
@@ -67,6 +69,7 @@ def calculate_statistics(errors, inliers_report, matches_report, fname='stats.js
     print('min error: ', np.min(errors))
     print('std error: ', np.std(errors))
     print('RMSE: ', math.sqrt(np.mean(errors**2)))
+    print("Cumulative error: ", np.sum(errors))
     print("------------------")
     
     print("------------------")
@@ -108,6 +111,7 @@ def calculate_statistics(errors, inliers_report, matches_report, fname='stats.js
     stats['min_error'] = np.min(errors)
     stats['std_error'] = np.std(errors)
     stats['RMSE'] = math.sqrt(np.mean(errors**2))
+    stats['cumulative_error'] = np.sum(errors)
     stats['mean_matches'] = np.mean(matches_report)
     stats['median_matches'] = np.median(matches_report)
     stats['max_matches'] = np.max(matches_report)
@@ -127,7 +131,7 @@ def calculate_statistics(errors, inliers_report, matches_report, fname='stats.js
     # convert all values in stats to python int from numpy
     
     for key in stats.keys():
-        stats[key] = int(stats[key])
+        stats[key] = float(stats[key])
     with open(fname, 'w') as outfile:
         json.dump(stats, outfile)
 
@@ -149,9 +153,10 @@ if __name__ == "__main__":
     
     is_draw_3d = args.plot
     is_draw_traj_img = args.plot
-    is_draw_err = args.plot 
+    is_draw_err = args.plot
     is_draw_matched_points = args.plot 
     is_draw_cam = args.plot
+    calculate_relative_error = True
     
     if kUsePangolin:
         from viewer3D import Viewer3D
@@ -160,9 +165,10 @@ if __name__ == "__main__":
     config.dataset_settings['is_color'] = "True"
 
     dataset = dataset_factory(config.dataset_settings)
-
-    groundtruth = groundtruth_factory(config.dataset_settings)
-
+    if args.groundtruth:
+        groundtruth = groundtruth_factory(config.dataset_settings)
+    else:
+        groundtruth = None
     cam = PinholeCamera(config.cam_settings['Camera.width'], config.cam_settings['Camera.height'],
                         config.cam_settings['Camera.fx'], config.cam_settings['Camera.fy'],
                         config.cam_settings['Camera.cx'], config.cam_settings['Camera.cy'],
@@ -174,7 +180,7 @@ if __name__ == "__main__":
     # select your tracker configuration (see the file feature_tracker_configs.py) 
     # LK_SHI_TOMASI, LK_FAST
     # SHI_TOMASI_ORB, FAST_ORB, ORB, BRISK, AKAZE, FAST_FREAK, SIFT, ROOT_SIFT, SURF, SUPERPOINT, FAST_TFEAT
-    tracker_config = tracker_config = getattr(FeatureTrackerConfigs, args.tracker)
+    tracker_config = getattr(FeatureTrackerConfigs, args.tracker)
     tracker_config['num_features'] = num_features
     
     feature_tracker = feature_tracker_factory(**tracker_config)
@@ -205,83 +211,102 @@ if __name__ == "__main__":
     errors = []
     matches_report = []
     inliers_report = []
+    
+    relative_errors = []
     while dataset.isOk():
 
         img = dataset.getImage(img_id)
 
-        if img is not None:
+        if img is None:
+            continue
+        if args.img_resize:
+            img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
+            
+        vo.track(img, img_id)  # main VO function 
 
-            vo.track(img, img_id)  # main VO function 
+        if(img_id < 2):	       # start drawing from the third image (when everything is initialized and flows in a normal way)
+            continue
+        
 
-            if(img_id > 2):	       # start drawing from the third image (when everything is initialized and flows in a normal way)
+        
+        if calculate_relative_error:
+            # applying the relative transformation to the last ground truth position
+            absolute_scale = vo.getAbsoluteScale(img_id-1)
+            t_last, rot_last = vo.groundtruth.extract_pose_values(img_id-1)
+            estimated_t = t_last + absolute_scale*rot_last.dot(vo.t_est[-1]).transpose()
+            
+            t_curr, _ = vo.groundtruth.extract_pose_values(img_id)
+            
+            x, y, z = estimated_t[0,0], estimated_t[0,1], estimated_t[0,2]
+            x_true, y_true, z_true = t_curr[0], t_curr[1], t_curr[2]
+            
+            print("estimation:",estimated_t)
+            print("gt:", t_curr)
+        else:
+            x, y, z = vo.traj3d_est[-1]
+            x_true, y_true, z_true = vo.traj3d_gt[-1]
+            
+        if is_draw_traj_img:      # draw 2D trajectory (on the plane xz)
+            draw_x, draw_y = int(draw_scale*x) + half_traj_img_size, half_traj_img_size - int(draw_scale*z)
+            true_x, true_y = int(draw_scale*x_true) + half_traj_img_size, half_traj_img_size - int(draw_scale*z_true)
+            cv2.circle(traj_img, (draw_x, draw_y), 1,(img_id*255/4540, 255-img_id*255/4540, 0), 1)   # estimated from green to blue
+            cv2.circle(traj_img, (true_x, true_y), 1,(0, 0, 255), 1)  # groundtruth in red
+            # write text on traj_img
+            cv2.rectangle(traj_img, (10, 20), (600, 60), (0, 0, 0), -1)
+            text = "Coordinates: x=%2fm y=%2fm z=%2fm" % (x, y, z)
+            cv2.putText(traj_img, text, (20, 40), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, 8)
+            # show 		
+            cv2.imshow('Trajectory', traj_img)
 
-                x, y, z = vo.traj3d_est[-1]
-                x_true, y_true, z_true = vo.traj3d_gt[-1]
+        if is_draw_3d:           # draw 3d trajectory 
+            if kUsePangolin:
+                viewer3D.draw_vo(vo)   
+            else:
+                plt3d.drawTraj(vo.traj3d_gt,'ground truth',color='r',marker='.')
+                plt3d.drawTraj(vo.traj3d_est,'estimated',color='g',marker='.')
+                plt3d.refresh()
+        err = math.sqrt((x_true-x)**2 + (y_true-y)**2 + (z_true-z)**2)
+        errors.append(err)
+        if is_draw_err:         # draw error signals 
+            errx = [img_id, math.fabs(x_true-x)]
+            erry = [img_id, math.fabs(y_true-y)]
+            errz = [img_id, math.fabs(z_true-z)] 
+            
+            
+            sqr_err  = [img_id, err]
+            err_plt.draw(errx,'err_x',color='g')
+            err_plt.draw(erry,'err_y',color='b')
+            err_plt.draw(errz,'err_z',color='r')
+            err_plt.draw(sqr_err,'sqr_err',color='k')
+            err_plt.refresh()    
+            
 
-                if is_draw_traj_img:      # draw 2D trajectory (on the plane xz)
-                    draw_x, draw_y = int(draw_scale*x) + half_traj_img_size, half_traj_img_size - int(draw_scale*z)
-                    true_x, true_y = int(draw_scale*x_true) + half_traj_img_size, half_traj_img_size - int(draw_scale*z_true)
-                    cv2.circle(traj_img, (draw_x, draw_y), 1,(img_id*255/4540, 255-img_id*255/4540, 0), 1)   # estimated from green to blue
-                    cv2.circle(traj_img, (true_x, true_y), 1,(0, 0, 255), 1)  # groundtruth in red
-                    # write text on traj_img
-                    cv2.rectangle(traj_img, (10, 20), (600, 60), (0, 0, 0), -1)
-                    text = "Coordinates: x=%2fm y=%2fm z=%2fm" % (x, y, z)
-                    cv2.putText(traj_img, text, (20, 40), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, 8)
-                    # show 		
-                    cv2.imshow('Trajectory', traj_img)
-
-                if is_draw_3d:           # draw 3d trajectory 
-                    if kUsePangolin:
-                        viewer3D.draw_vo(vo)   
-                    else:
-                        plt3d.drawTraj(vo.traj3d_gt,'ground truth',color='r',marker='.')
-                        plt3d.drawTraj(vo.traj3d_est,'estimated',color='g',marker='.')
-                        plt3d.refresh()
-                err = math.sqrt((x_true-x)**2 + (y_true-y)**2 + (z_true-z)**2)
-                errors.append(err)
-                if is_draw_err:         # draw error signals 
-                    errx = [img_id, math.fabs(x_true-x)]
-                    erry = [img_id, math.fabs(y_true-y)]
-                    errz = [img_id, math.fabs(z_true-z)] 
-                    
-                    
-                    sqr_err  = [img_id, err]
-                    err_plt.draw(errx,'err_x',color='g')
-                    err_plt.draw(erry,'err_y',color='b')
-                    err_plt.draw(errz,'err_z',color='r')
-                    err_plt.draw(sqr_err,'sqr_err',color='k')
-                    err_plt.refresh()    
-                    
-
-                if is_draw_matched_points:
-                    matched_kps_signal = [img_id, vo.num_matched_kps]
-                    inliers_signal = [img_id, vo.num_inliers]                    
-                    matched_points_plt.draw(matched_kps_signal,'# matches',color='b')
-                    matched_points_plt.draw(inliers_signal,'# inliers',color='g')                    
-                    matched_points_plt.refresh()
-                matches_report.append(vo.num_matched_kps)
-                inliers_report.append(vo.num_inliers)                    
+        if is_draw_matched_points:
+            matched_kps_signal = [img_id, vo.num_matched_kps]
+            inliers_signal = [img_id, vo.num_inliers]                    
+            matched_points_plt.draw(matched_kps_signal,'# matches',color='b')
+            matched_points_plt.draw(inliers_signal,'# inliers',color='g')                    
+            matched_points_plt.refresh()
+        matches_report.append(vo.num_matched_kps)
+        inliers_report.append(vo.num_inliers)                    
 
 
-            # draw camera image 
-            if is_draw_cam:
-                cv2.imshow('Camera', vo.draw_img)				
-
-        # press 'q' to exit!
+        # draw camera image 
         if is_draw_cam:
+            cv2.imshow('Camera', vo.draw_img)				
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         img_id += 1
 
-    #print('press a key in order to exit...')
-    #cv2.waitKey(0)
+    print('press a key in order to exit...')
+    cv2.waitKey(0)
     
-    calculate_statistics(errors, inliers_report, matches_report, fname='stats.json')
+    calculate_statistics(errors, inliers_report, matches_report, fname=args.tracker +'.json')
         
     
     if is_draw_traj_img:
         print('saving map.png')
-        cv2.imwrite('map.png', traj_img)
+        cv2.imwrite(args.tracker + 'map.png', traj_img)
     if is_draw_3d:
         if not kUsePangolin:
             plt3d.quit()
