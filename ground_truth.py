@@ -50,7 +50,7 @@ def groundtruth_factory(settings):
         if 'associations' in settings:
             associations = settings['associations']        
         return TumGroundTruth(path, name, associations, GroundTruthType.TUM)
-    if type == 'kittivideo':   
+    if type == 'kittivideo':  
         name = settings['groundtruth_file']
         return KittiVideoGroundTruth(path, name, associations, GroundTruthType.KITTI)     
     if type == 'video' or type == 'folder':   
@@ -121,7 +121,7 @@ class KittiVideoGroundTruth(GroundTruth):
     def __init__(self, path, name, associations=None, type = GroundTruthType.KITTI): 
         super().__init__(path, name, associations, type)
         self.scale = kScaleSimple
-        self.filename=path + '/'  +"06.txt"
+        self.filename=path + '/'  + name
         with open(self.filename) as f:
             self.data = f.readlines()
             self.found = True 

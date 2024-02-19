@@ -21,6 +21,7 @@ import numpy as np
 import cv2
 #import g2o
 from utils_geom import add_ones
+import torch
 
 
 class Camera: 
@@ -122,3 +123,92 @@ class PinholeCamera(Camera):
         return (uvs[:, 0] > self.u_min) & (uvs[:, 0] < self.u_max) & \
                (uvs[:, 1] > self.v_min) & (uvs[:, 1] < self.v_max) & \
                (zs > 0 )
+
+class CameraTorch: 
+    def __init__(self, width, height, fx, fy, cx, cy, D, fps = 1): # D = [k1, k2, p1, p2, k3]
+        self.width = width
+        self.height = height
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
+        self.D = torch.tensor(D,dtype=torch.float32) # np.array([k1, k2, p1, p2, k3])  distortion coefficients 
+        self.fps = fps 
+        
+        self.is_distorted = torch.linalg.norm(self.D) > 1e-10
+        self.initialized = False   
+        
+class PinholeCameraTorch(CameraTorch):
+    def __init__(self, width, height, fx, fy, cx, cy, D, fps=1):
+        super().__init__(width, height, fx, fy, cx, cy, D, fps)
+        self.width = width
+        self.height = height
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
+        self.D = D
+        self.fps = fps
+        self.K = torch.tensor([[fx, 0, cx],
+                               [0, fy, cy],
+                               [0, 0, 1]], dtype=torch.float32)
+        self.Kinv = torch.tensor([[1/fx, 0, -cx/fx],
+                                  [0, 1/fy, -cy/fy],
+                                  [0, 0, 1]], dtype=torch.float32)
+        self.u_min, self.u_max = 0, self.width
+        self.v_min, self.v_max = 0, self.height
+        self.initialized = False
+
+    def init(self):
+        if not self.initialized:
+            self.initialized = True
+            self.undistort_image_bounds()
+
+    def project(self, xcs):
+        projs = torch.matmul(self.K, xcs.t())
+        zs = projs[-1]
+        projs = projs[:2] / zs
+        return projs.t(), zs
+
+    def unproject(self, uv):
+        x = (uv[0] - self.cx) / self.fx
+        y = (uv[1] - self.cy) / self.fy
+        return x, y
+
+    def unproject_points(self, uvs):
+        uvs = torch.tensor(uvs)
+        return torch.matmul(self.Kinv, torch.cat((uvs, torch.ones(uvs.shape[0], 1)), dim=1).t()).t()[:, :2]
+
+    def undistort_points(self, uvs):
+        if self.is_distorted:
+            # Perform undistortion using PyTorch operations
+            uvs_contiguous = uvs[:, :2].contiguous().view(uvs.shape[0], 1, 2)
+            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.D, None, self.K)
+            return uvs_undistorted.view(uvs_undistorted.shape[0], 2)
+        else:
+            return uvs
+
+    def undistort_image_bounds(self):
+        uv_bounds = torch.tensor([[self.u_min, self.v_min],
+                                  [self.u_min, self.v_max],
+                                  [self.u_max, self.v_min],
+                                  [self.u_max, self.v_max]], dtype=torch.float32)
+        if self.is_distorted:
+            uv_bounds_undistorted = cv2.undistortPoints(uv_bounds.unsqueeze(1), self.K, self.D, None, self.K)
+            uv_bounds_undistorted = uv_bounds_undistorted.view(uv_bounds_undistorted.shape[0], 2)
+        else:
+            uv_bounds_undistorted = uv_bounds
+        self.u_min = min(uv_bounds_undistorted[0, 0], uv_bounds_undistorted[1, 0])
+        self.u_max = max(uv_bounds_undistorted[2, 0], uv_bounds_undistorted[3, 0])
+        self.v_min = min(uv_bounds_undistorted[0, 1], uv_bounds_undistorted[2, 1])
+        self.v_max = max(uv_bounds_undistorted[1, 1], uv_bounds_undistorted[3, 1])
+
+    def is_in_image(self, uv, z):
+        return (uv[0] > self.u_min) & (uv[0] < self.u_max) & \
+               (uv[1] > self.v_min) & (uv[1] < self.v_max) & \
+               (z > 0)
+
+    def are_in_image(self, uvs, zs):
+        return (uvs[:, 0] > self.u_min) & (uvs[:, 0] < self.u_max) & \
+               (uvs[:, 1] > self.v_min) & (uvs[:, 1] < self.v_max) & \
+               (zs > 0)

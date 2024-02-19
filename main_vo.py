@@ -24,7 +24,7 @@ import math
 from config import Config
 
 from visual_odometry import VisualOdometry
-from camera  import PinholeCamera
+from camera  import PinholeCamera, PinholeCameraTorch
 from ground_truth import groundtruth_factory
 from dataset import dataset_factory
 
@@ -41,15 +41,16 @@ from feature_tracker_configs import FeatureTrackerConfigs
 import argparse
 def parse_args():
     parser = argparse.ArgumentParser(description='Visual Odometry')
-    parser.add_argument('--config', type=str, default='config/default.yaml', help='config file')
-    parser.add_argument('--dataset', type=str, default='dataset/kitti', help='dataset folder')
-    parser.add_argument('--output', type=str, default='output', help='output folder')
-    parser.add_argument('--verbose', action='store_true', help='verbose')
+    parser.add_argument('--config', type=str, default='config.ini', help='config file')
+    #parser.add_argument('--dataset', type=str, default='dataset/kitti', help='dataset folder')
+    #parser.add_argument('--output', type=str, default='output', help='output folder')
+    #parser.add_argument('--verbose', action='store_true', help='verbose')
     parser.add_argument('--use_viewer', action='store_true', help='use pangolin viewer')
     parser.add_argument('--plot', action='store_true', help='plot results')
     parser.add_argument('--tracker', type=str, default='LK_SHI_TOMASI', help='feature tracker')
     parser.add_argument('--groundtruth', action='store_true', help='use groundtruth')
     parser.add_argument('--img_resize', action='store_true', help='resize images')
+    parser.add_argument('--absolute_error', action='store_true', help='calculate absolute trajectory error')
     args = parser.parse_args()
     return args
 
@@ -153,14 +154,14 @@ if __name__ == "__main__":
     
     is_draw_3d = args.plot
     is_draw_traj_img = args.plot
-    is_draw_err = args.plot
+    is_draw_err = args.groundtruth and args.plot
     is_draw_matched_points = args.plot 
     is_draw_cam = args.plot
-    calculate_relative_error = True
+    calculate_relative_error = args.groundtruth and not args.absolute_error
     
     if kUsePangolin:
         from viewer3D import Viewer3D
-    config = Config()
+    config = Config(args.config)
     
     config.dataset_settings['is_color'] = "True"
 
@@ -188,7 +189,6 @@ if __name__ == "__main__":
     # create visual odometry object 
     vo = VisualOdometry(cam, groundtruth, feature_tracker)
 
-    
     traj_img_size = 800
     traj_img = np.zeros((traj_img_size, traj_img_size, 3), dtype=np.uint8)
     half_traj_img_size = int(0.5*traj_img_size)
@@ -203,8 +203,6 @@ if __name__ == "__main__":
 
     
         err_plt = Mplot2d(xlabel='img id', ylabel='m',title='error')
-
-        
         matched_points_plt = Mplot2d(xlabel='img id', ylabel='# matches',title='# matches')
 
     img_id = 0
@@ -224,7 +222,8 @@ if __name__ == "__main__":
             
         vo.track(img, img_id)  # main VO function 
 
-        if(img_id < 2):	       # start drawing from the third image (when everything is initialized and flows in a normal way)
+        if(img_id <= 2):	       # start drawing from the third image (when everything is initialized and flows in a normal way)
+            img_id += 1
             continue
         
 
@@ -265,6 +264,7 @@ if __name__ == "__main__":
                 plt3d.drawTraj(vo.traj3d_gt,'ground truth',color='r',marker='.')
                 plt3d.drawTraj(vo.traj3d_est,'estimated',color='g',marker='.')
                 plt3d.refresh()
+                
         err = math.sqrt((x_true-x)**2 + (y_true-y)**2 + (z_true-z)**2)
         errors.append(err)
         if is_draw_err:         # draw error signals 
@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
         # draw camera image 
         if is_draw_cam:
-            cv2.imshow('Camera', vo.draw_img)				
+            cv2.imshow('Camera', vo.draw_img)			
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         img_id += 1

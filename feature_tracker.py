@@ -76,6 +76,9 @@ class FeatureTrackingResult(object):
         self.idxs_cur = None         # indexes of matches in kps_cur so that kps_cur_matched = kps_cur[idxs_cur]  (numpy array of indexes)
         self.kps_ref_matched = None  # reference matched keypoints, kps_ref_matched = kps_ref[idxs_ref]
         self.kps_cur_matched = None  # current matched keypoints, kps_cur_matched = kps_cur[idxs_cur]
+        
+        self.seg_ref = None          # reference segmentation mask (numpy array HxW)
+        self.seg_cur = None          # current segmentation mask (numpy array HxW)
 
 
 # Base class for a feature tracker.
@@ -94,6 +97,7 @@ class FeatureTracker(object):
 
         self.feature_manager = None      # it contains both detector and descriptor  
         self.matcher = None              # it contain descriptors matching methods based on BF, FLANN, etc.
+        self.segmentation = False
                 
     @property
     def num_features(self):
@@ -217,8 +221,11 @@ class DescriptorFeatureTracker(FeatureTracker):
 
 
     # out: FeatureTrackingResult()
-    def track(self, image_ref, image_cur, kps_ref, des_ref):
-        kps_cur, des_cur = self.detectAndCompute(image_cur)
+    def track(self, image_ref, image_cur, kps_ref, des_ref, seg_ref=None):
+        if self.segmentation:
+            kps_cur, des_cur, seg_cur = self.detectAndCompute(image_cur)
+        else:
+            kps_cur, des_cur = self.detectAndCompute(image_cur)
         # convert from list of keypoints to an array of points 
         kps_cur = np.array([x.pt for x in kps_cur], dtype=np.float32) 
     
@@ -228,7 +235,11 @@ class DescriptorFeatureTracker(FeatureTracker):
         res = FeatureTrackingResult()
         res.kps_ref = kps_ref  # all the reference keypoints  
         res.kps_cur = kps_cur  # all the current keypoints       
-        res.des_cur = des_cur  # all the current descriptors         
+        res.des_cur = des_cur  # all the current descriptors   
+        if self.segmentation:
+            res.seg_cur = seg_cur   
+            if seg_ref is not None:
+                res.seg_ref = seg_ref
         
         res.kps_ref_matched = np.asarray(kps_ref[idxs_ref]) # the matched ref kps  
         res.idxs_ref = np.asarray(idxs_ref)                  

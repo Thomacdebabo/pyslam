@@ -16,7 +16,8 @@
 * You should have received a copy of the GNU General Public License
 * along with PYSLAM. If not, see <http://www.gnu.org/licenses/>.
 """
-
+import kornia
+import torch
 import numpy as np 
 import cv2
 from enum import Enum
@@ -24,6 +25,7 @@ from enum import Enum
 from feature_tracker import FeatureTrackerTypes, FeatureTrackingResult, FeatureTracker
 from utils_geom import poseRt
 from timer import TimerFps
+
 
 class VoStage(Enum):
     NO_IMAGES_YET   = 0     # no image received 
@@ -54,8 +56,10 @@ class VisualOdometry(object):
 
         self.kps_ref = None  # reference keypoints 
         self.des_ref = None # refeference descriptors 
+        self.seg_ref = None # reference segmentation mask
         self.kps_cur = None  # current keypoints 
         self.des_cur = None # current descriptors 
+        self.seg_cur = None # current segmentation mask
 
         self.cur_R = np.eye(3,3) # current rotation 
         self.cur_t = np.zeros((3,1)) # current translation 
@@ -86,6 +90,8 @@ class VisualOdometry(object):
         self.timer_main = TimerFps('VO', is_verbose = self.timer_verbose)
         self.timer_pose_est = TimerFps('PoseEst', is_verbose = self.timer_verbose)
         self.timer_feat = TimerFps('Feature', is_verbose = self.timer_verbose)
+        
+        self.segmentation = False
 
     # get current translation scale from ground-truth if groundtruth is not None 
     def getAbsoluteScale(self, frame_id):  
@@ -107,6 +113,24 @@ class VisualOdometry(object):
                 # more than one matrix found, just pick the first
                 F = F[0:3, 0:3]
             return np.matrix(F), mask 	
+        
+    def computeFundamentalMatrixTorch(self, kps_ref, kps_cur):
+        kps_ref = torch.from_numpy(kps_ref).float().unsqueeze(0)
+        kps_cur = torch.from_numpy(kps_cur).float().unsqueeze(0)
+
+        F = kornia.geometry.epipolar.find_fundamental(kps_ref, kps_cur)
+        mask = torch.ones(1, kps_ref.shape[1], dtype=torch.uint8)
+        if F is None or F.shape == (1, 1):
+            # no fundamental matrix found
+            raise Exception('No fundamental matrix found')
+        elif F.shape[0] > 3:
+            # more than one matrix found, just pick the first
+            F = F[0:3, 0:3]
+            mask = mask[0]
+
+        return F, mask
+    
+        
 
     def removeOutliersByMask(self, mask): 
         if mask is not None:    
@@ -141,6 +165,7 @@ class VisualOdometry(object):
             except: 
                 ransac_method = cv2.RANSAC
             # the essential matrix algorithm is more robust since it uses the five-point algorithm solver by D. Nister (see the notes and paper above )
+            #E = kornia.geometry.epipolar.find_essential(self.kpn_cur, self.kpn_ref)
             E, self.mask_match = cv2.findEssentialMat(self.kpn_cur, self.kpn_ref, focal=1, pp=(0., 0.), method=ransac_method, prob=kRansacProb, threshold=kRansacThresholdNormalized)
         else:
             # just for the hell of testing fundamental matrix fitting ;-) 
@@ -149,6 +174,25 @@ class VisualOdometry(object):
         #self.removeOutliersFromMask(self.mask)  # do not remove outliers, the last unmatched/outlier features can be matched and recognized as inliers in subsequent frames                          
         _, R, t, mask = cv2.recoverPose(E, self.kpn_cur, self.kpn_ref, focal=1, pp=(0., 0.))   
         return R,t  # Rrc, trc (with respect to 'ref' frame) 		
+    
+    
+    def estimatePoseTorch(self, kps_ref, kps_cur):
+        kp_ref_u = self.cam.undistort_points(kps_ref)
+        kp_cur_u = self.cam.undistort_points(kps_cur)
+        self.kpn_ref = self.cam.unproject_points(kp_ref_u)
+        self.kpn_cur = self.cam.unproject_points(kp_cur_u)
+        kUseEssentialMatrixEstimation = False
+        if kUseEssentialMatrixEstimation:
+            # the essential matrix algorithm is more robust since it uses the five-point algorithm solver by D. Nister (see the notes and paper above)
+            E, self.mask_match = kornia.geometry.epipolar.find_essential(self.kpn_cur, self.kpn_ref)
+        else:
+            # just for the hell of testing fundamental matrix fitting ;-)
+            F, self.mask_match = self.computeFundamentalMatrixTorch(kp_cur_u, kp_ref_u)
+            E = self.cam.K.T @ F @ self.cam.K  # E = K.T * F * K
+        print(E.shape, self.cam.K.shape, self.kpn_cur.shape, self.kpn_ref.shape)
+        # self.removeOutliersFromMask(self.mask)  # do not remove outliers, the last unmatched/outlier features can be matched and recognized as inliers in subsequent frames
+        R, t, _ = kornia.geometry.epipolar.motion_from_essential_choose_solution(E, self.cam.K.unsqueeze(0), self.cam.K.unsqueeze(0), self.kpn_cur_u.unsqueeze(0), self.kpn_ref_u.unsqueeze(0))
+        return R, t  # Rrc, trc (with respect to 'ref' frame)
 
     def processFirstFrame(self):
         # only detect on the current image 
@@ -160,7 +204,10 @@ class VisualOdometry(object):
     def processFrame(self, frame_id):
         # track features 
         self.timer_feat.start()
-        self.track_result = self.feature_tracker.track(self.prev_image, self.cur_image, self.kps_ref, self.des_ref)
+        if self.segmentation:
+            self.track_result = self.feature_tracker.track(self.prev_image, self.cur_image, self.kps_ref, self.des_ref, self.seg_ref)
+        else:
+            self.track_result = self.feature_tracker.track(self.prev_image, self.cur_image, self.kps_ref, self.des_ref)
         self.timer_feat.refresh()
         # estimate pose 
         self.timer_pose_est.start()
@@ -196,8 +243,48 @@ class VisualOdometry(object):
                 print('# new detected points: ', self.kps_cur.shape[0])                  
         self.kps_ref = self.kps_cur
         self.des_ref = self.des_cur
-        self.updateHistory()           
+        self.updateHistory()   
+                
+    def processFrameTorch(self, frame_id):
+        # track features 
+        self.timer_feat.start()
+        self.track_result = self.feature_tracker.track(self.prev_image, self.cur_image, self.kps_ref, self.des_ref)
+        self.timer_feat.refresh()
+        # estimate pose 
+        self.timer_pose_est.start()
+        R, t = self.estimatePoseTorch(self.track_result.kps_ref_matched, self.track_result.kps_cur_matched)  
         
+        self.R_est.append(R)
+        self.t_est.append(t)
+           
+        self.timer_pose_est.refresh()
+        # update keypoints history  
+        self.kps_ref = self.track_result.kps_ref
+        self.kps_cur = self.track_result.kps_cur
+        self.des_cur = self.track_result.des_cur 
+        self.num_matched_kps = self.kpn_ref.shape[0] 
+        self.num_inliers =  self.mask_match.sum()
+        if kVerbose:        
+            print('# matched points: ', self.num_matched_kps, ', # inliers: ', self.num_inliers)      
+        # t is estimated up to scale (i.e. the algorithm always returns ||trc||=1, we need a scale in order to recover a translation which is coherent with the previous estimated ones)
+        absolute_scale = self.getAbsoluteScale(frame_id)
+        if(absolute_scale > kAbsoluteScaleThreshold):
+            # compose absolute motion [Rwa,twa] with estimated relative motion [Rab,s*tab] (s is the scale extracted from the ground truth)
+            # [Rwb,twb] = [Rwa,twa]*[Rab,tab] = [Rwa*Rab|twa + Rwa*tab]
+            print('estimated t with norm |t|: ', np.linalg.norm(t), ' (just for sake of clarity)')
+            self.cur_t = self.cur_t + absolute_scale*self.cur_R.dot(t) 
+            self.cur_R = self.cur_R.dot(R)       
+        # draw image         
+        self.draw_img = self.drawFeatureTracks(self.cur_image) 
+        # check if we have enough features to track otherwise detect new ones and start tracking from them (used for LK tracker) 
+        if (self.feature_tracker.tracker_type == FeatureTrackerTypes.LK) and (self.kps_ref.shape[0] < self.feature_tracker.num_features): 
+            self.kps_cur, self.des_cur = self.feature_tracker.detectAndCompute(self.cur_image)           
+            self.kps_cur = torch.tensor([x.pt for x in self.kps_cur], dtype=torch.float32) # convert from list of keypoints to an array of points   
+            if kVerbose:     
+                print('# new detected points: ', self.kps_cur.shape[0])                  
+        self.kps_ref = self.kps_cur
+        self.des_ref = self.des_cur
+        self.updateHistory()  
 
     def track(self, img, frame_id):
         if kVerbose:

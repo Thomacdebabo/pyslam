@@ -32,7 +32,6 @@ from utils_sys import Printer, is_opencv_version_greater_equal
 
 kVerbose = True   
 
-
 class SuperPointOptions:
     def __init__(self, do_cuda=True, debug=True): 
         # default options from demo_superpoints
@@ -89,6 +88,7 @@ class KP2DtinyFeature:
         self.pts = []
         self.kps = []        
         self.des = []
+        self.seg = []
         self.heatmap = [] 
         self.frame = None 
         self.frameFloat = None 
@@ -106,7 +106,7 @@ class KP2DtinyFeature:
             frame = (frame.astype('float32').transpose([2,1,0]) / 127.5 - 1.0)
             #self.frameFloat = np.stack([frame,frame,frame], axis=0)            
             self.frameFloat = frame
-            self.pts, self.des = self.fe.run(self.frameFloat)
+            self.pts, self.des, self.seg = self.fe.run(self.frameFloat)
 
             self.pts[:,0] = self.pts[:,0]*scale[1]
             self.pts[:,1] = self.pts[:,1]*scale[0]
@@ -115,7 +115,7 @@ class KP2DtinyFeature:
             self.kps = convert_superpts_to_keypoints(self.pts, size=self.keypoint_size)
             if kVerbose:
                 print('detector: KP2Dtiny, #features: ', len(self.kps), ', frame res: ', frame.shape[0:2])      
-            return self.kps, self.des              
+            return self.kps, self.des, self.seg         
             
     # return keypoints if available otherwise call detectAndCompute()    
     def detect(self, frame, mask=None):  # mask is a fake input  
