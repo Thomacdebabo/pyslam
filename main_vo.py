@@ -214,7 +214,7 @@ if __name__ == "__main__":
     while dataset.isOk():
 
         img = dataset.getImage(img_id)
-
+        print("image shape", img.shape)
         if img is None:
             continue
         if args.img_resize:

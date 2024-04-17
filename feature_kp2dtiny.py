@@ -115,7 +115,7 @@ class KP2DtinyFeature:
             self.kps = convert_superpts_to_keypoints(self.pts, size=self.keypoint_size)
             if kVerbose:
                 print('detector: KP2Dtiny, #features: ', len(self.kps), ', frame res: ', frame.shape[0:2])      
-            return self.kps, self.des, self.seg         
+            return self.kps, self.des        
             
     # return keypoints if available otherwise call detectAndCompute()    
     def detect(self, frame, mask=None):  # mask is a fake input  
